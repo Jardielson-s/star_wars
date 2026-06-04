@@ -35,6 +35,17 @@ std::vector<Laser> activeLasers;
 float lastShotTime = 0.0f;
 const float SHOT_COOLDOWN = 0.2f;
 
+// Lasers do Inimigo
+struct EnemyLaser
+{
+  glm::vec3 Position;
+  glm::vec3 Direction;
+  float LifeTime;
+};
+std::vector<EnemyLaser> activeEnemyLasers;
+float lastEnemyShotTime = 0.0f;
+const float ENEMY_SHOT_COOLDOWN = 1.8f; // Tempo em segundos entre os tiros da nave
+
 // Estrutura de Partículas para a Explosão
 struct Particle
 {
@@ -126,10 +137,9 @@ int main()
   Shader laserShader("shaders/laser.vs", "shaders/laser.fs");
 
   // CARREGANDO O MODELO 3D VIA ASSIMP
-  // Substitua pelo caminho do seu arquivo .obj
   Model enemyModel("assets/nave.obj");
 
-  // Vértices fixos do Skybox (Apenas posições, o resto é gerado pelo shader)
+  // Vértices do Skybox
   float skyboxVertices[] = {
       -1.0f, 1.0f, -1.0f, -1.0f, -1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f, 1.0f, -1.0f, -1.0f, 1.0f, -1.0f,
       -1.0f, -1.0f, 1.0f, -1.0f, -1.0f, -1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f, 1.0f, -1.0f, -1.0f, 1.0f,
@@ -140,7 +150,7 @@ int main()
 
   float laserVertices[] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, -1.5f};
 
-  // Inicialização dos buffers do Skybox e Laser
+  // Inicialização dos buffers
   unsigned int skyboxVAO, skyboxVBO;
   glGenVertexArrays(1, &skyboxVAO);
   glGenBuffers(1, &skyboxVBO);
@@ -168,28 +178,63 @@ int main()
 
     processInput(window);
 
-    // --- MOTOR DE MOVIMENTAÇÃO E GAMEPLAY COM DELAY ---
+    // 1. MOTOR DE MOVIMENTAÇÃO DA NAVE INIMIGA
     if (enemyTarget.IsAlive)
     {
-      // A nave só se move se estiver viva
       float tempo = static_cast<float>(glfwGetTime());
       enemyTarget.Position.x = sin(tempo * 1.5f) * 3.0f;
       enemyTarget.Position.y = cos(tempo * 2.0f) * 1.8f;
     }
     else
     {
-      // Se estiver morta, fazemos a contagem regressiva usando o deltaTime
       enemyTarget.RespawnTimer -= deltaTime;
-
-      // Quando o tempo acabar, a nave "renasce" cheia de vida
       if (enemyTarget.RespawnTimer <= 0.0f)
       {
         enemyTarget.IsAlive = true;
-        std::cout << "NOVA NAVE INIMIGA DETECTADA! PREPARE-SE!" << std::endl;
       }
     }
 
-    // --- MOTOR DE FÍSICA COM SUB-STEPPING ---
+    // 2. INTELIGÊNCIA INIMIGA: ATACAR O JOGADOR
+    if (enemyTarget.IsAlive)
+    {
+      float currentTime = static_cast<float>(glfwGetTime());
+      if (currentTime - lastEnemyShotTime >= ENEMY_SHOT_COOLDOWN)
+      {
+        EnemyLaser el;
+        el.Position = enemyTarget.Position;
+        el.Direction = glm::normalize(camera.Position - enemyTarget.Position);
+        el.LifeTime = 4.0f;
+
+        activeEnemyLasers.push_back(el);
+        lastEnemyShotTime = currentTime;
+      }
+    }
+
+    // 3. ATUALIZAÇÃO DA FÍSICA DOS LASERS INIMIGOS
+    for (auto it = activeEnemyLasers.begin(); it != activeEnemyLasers.end();)
+    {
+      it->Position += it->Direction * 20.0f * deltaTime;
+      it->LifeTime -= deltaTime;
+
+      float distToPlayer = glm::distance(it->Position, camera.Position);
+      if (distToPlayer < 0.8f)
+      {
+        std::cout << "\n[ALERTA] VOCÊ FOI ATINGIDO PELO INIMIGO!" << std::endl;
+        it = activeEnemyLasers.erase(it);
+        continue;
+      }
+
+      if (it->LifeTime <= 0.0f)
+      {
+        it = activeEnemyLasers.erase(it);
+      }
+      else
+      {
+        ++it;
+      }
+    }
+
+    // 4. MOTOR DE FÍSICA DOS LASERS DO JOGADOR (SUB-STEPPING)
     for (auto it = activeLasers.begin(); it != activeLasers.end();)
     {
       bool laserDestroyed = false;
@@ -200,7 +245,6 @@ int main()
       {
         it->Position += stepMove;
 
-        // IMPORTANTE: Só checa colisão se a nave estiver viva no frame
         if (enemyTarget.IsAlive)
         {
           float dist = glm::distance(it->Position, enemyTarget.Position);
@@ -214,12 +258,11 @@ int main()
             std::cout << "===================================\n"
                       << std::endl;
 
-            // --- ENCOSTA O GATILHO DA EXPLOSÃO AQUI ---
             spawnExplosion(enemyTarget.Position);
+            activeEnemyLasers.clear(); // Limpa tiros remanescentes
 
-            // --- ATIVANDO O DELAY DE MORTE ---
             enemyTarget.IsAlive = false;
-            enemyTarget.RespawnTimer = enemyTarget.RespawnDelay; // Começa a contagem de 1.5s
+            enemyTarget.RespawnTimer = enemyTarget.RespawnDelay;
 
             laserDestroyed = true;
             break;
@@ -239,13 +282,11 @@ int main()
       }
     }
 
-    // --- MOTOR DE FÍSICA DAS PARTÍCULAS ---
+    // 5. MOTOR DE FÍSICA DAS PARTÍCULAS
     for (auto it = activeParticles.begin(); it != activeParticles.end();)
     {
       it->Position += it->Velocity * deltaTime;
       it->LifeTime -= deltaTime;
-
-      // Efeito opcional: faz a partícula perder o brilho (alpha) sumindo gradualmente
       it->Color.a = it->LifeTime;
 
       if (it->LifeTime <= 0.0f)
@@ -258,12 +299,13 @@ int main()
       }
     }
 
+    // --- PIPELINE DE RENDERIZAÇÃO ---
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     glm::mat4 view = camera.GetViewMatrix();
     glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float)SCREEN_WIDTH / (float)SCREEN_HEIGHT, 0.1f, 100.0f);
 
-    // 1. DESENHAR O SKYBOX
+    // PASSO 1: DESENHAR O SKYBOX
     glDepthMask(GL_FALSE);
     skyboxShader.use();
     glUniformMatrix4fv(glGetUniformLocation(skyboxShader.ID, "view"), 1, GL_FALSE, glm::value_ptr(view));
@@ -273,68 +315,50 @@ int main()
     glDrawArrays(GL_TRIANGLES, 0, 36);
     glDepthMask(GL_TRUE);
 
-    // 2. DESENHAR O MODELO IMPORTADO (Nave Inimiga)
-    // 2. DESENHAR O MODELO IMPORTADO (Nave Inimiga)
+    // PASSO 2: DESENHAR A NAVE INIMIGA
     if (enemyTarget.IsAlive)
     {
       objectShader.use();
-
       glm::vec3 luzPosicao(5.0f, 10.0f, 2.0f);
 
-      // Enviando apenas dados de luz e câmera (A cor agora vem do arquivo de imagem!)
       glUniform3fv(glGetUniformLocation(objectShader.ID, "lightPos"), 1, glm::value_ptr(luzPosicao));
       glUniform3fv(glGetUniformLocation(objectShader.ID, "viewPos"), 1, glm::value_ptr(camera.Position));
       glUniform3f(glGetUniformLocation(objectShader.ID, "lightColor"), 1.0f, 1.0f, 1.0f);
 
-      // CONFIGURAÇÃO DAS MATRIZES
       glm::mat4 model = glm::mat4(1.0f);
       model = glm::translate(model, enemyTarget.Position);
       model = glm::rotate(model, glm::radians(80.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-
       float escalaNave = 0.15f;
       model = glm::scale(model, glm::vec3(escalaNave, escalaNave, escalaNave));
-      model = glm::translate(model, glm::vec3(0.0f, 0.0f, 0.0f));
 
       glUniformMatrix4fv(glGetUniformLocation(objectShader.ID, "model"), 1, GL_FALSE, glm::value_ptr(model));
       glUniformMatrix4fv(glGetUniformLocation(objectShader.ID, "view"), 1, GL_FALSE, glm::value_ptr(view));
       glUniformMatrix4fv(glGetUniformLocation(objectShader.ID, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
       glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-
-      // O método Draw ativa automaticamente as texturas vinculadas pelo Assimp
       enemyModel.Draw(objectShader);
     }
-    // 3. RENDERIZAR OS LASERS ATIVOS
-    laserShader.use();
-    glUniformMatrix4fv(glGetUniformLocation(laserShader.ID, "view"), 1, GL_FALSE, glm::value_ptr(view));
-    glUniformMatrix4fv(glGetUniformLocation(laserShader.ID, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
-    glUniform3f(glGetUniformLocation(laserShader.ID, "laserColor"), 0.0f, 1.0f, 0.3f);
-    glLineWidth(4.0f);
-    glBindVertexArray(laserVAO);
 
-    // 4. RENDERIZAR AS PARTÍCULAS DA EXPLOSÃO
+    // PASSO 3: DESENHAR AS PARTÍCULAS DA EXPLOSÃO
     laserShader.use();
     glUniformMatrix4fv(glGetUniformLocation(laserShader.ID, "view"), 1, GL_FALSE, glm::value_ptr(view));
     glUniformMatrix4fv(glGetUniformLocation(laserShader.ID, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
-    // Configura o OpenGL para desenhar pontos maiores na tela
     glPointSize(6.0f);
-    glBindVertexArray(laserVAO); // Usa o VAO genérico de posições
-
+    glBindVertexArray(laserVAO);
     for (const auto &particle : activeParticles)
     {
       glm::mat4 pModel = glm::mat4(1.0f);
       pModel = glm::translate(pModel, particle.Position);
       glUniformMatrix4fv(glGetUniformLocation(laserShader.ID, "model"), 1, GL_FALSE, glm::value_ptr(pModel));
-
-      // Passa a cor dinâmica de cada partícula para o shader (Laranja/Amarelo)
       glUniform3f(glGetUniformLocation(laserShader.ID, "laserColor"), particle.Color.r, particle.Color.g, particle.Color.b);
-
-      // Desenha apenas o primeiro vértice do buffer como um ponto isolado no espaço
       glDrawArrays(GL_POINTS, 0, 1);
     }
-    glPointSize(1.0f); // Reseta o tamanho do ponto padrão
+    glPointSize(1.0f);
 
+    // PASSO 4: DESENHAR OS SEUS LASERS (VERDES)
+    glUniform3f(glGetUniformLocation(laserShader.ID, "laserColor"), 0.0f, 1.0f, 0.0f); // Verde Puro
+    glLineWidth(3.0f);
     for (const auto &laser : activeLasers)
     {
       glm::mat4 lModel = glm::inverse(glm::lookAt(laser.Position, laser.Position + laser.Direction, glm::vec3(0.0f, 1.0f, 0.0f)));
@@ -342,7 +366,41 @@ int main()
       glUniformMatrix4fv(glGetUniformLocation(laserShader.ID, "model"), 1, GL_FALSE, glm::value_ptr(lModel));
       glDrawArrays(GL_LINES, 0, 2);
     }
-    glLineWidth(1.0f);
+
+    // PASSO 5: DESENHAR OS LASERS INIMIGOS (VERMELHOS)
+
+    // PASSO 5: DESENHAR O LASERS INIMIGOS (VERMELHOS)
+    glUniform3f(glGetUniformLocation(laserShader.ID, "laserColor"), 1.0f, 0.0f, 0.0f); // Vermelho Puro
+    glLineWidth(4.0f);                                                                 // Linha mais grossa para o perigo
+
+    for (const auto &eLaser : activeEnemyLasers)
+    {
+      glm::mat4 elModel = glm::mat4(1.0f);
+
+      // 1. Posiciona o início da linha na coordenada atual do laser inimigo
+      elModel = glm::translate(elModel, eLaser.Position);
+
+      // 2. Alinha a direção do laser baseado no vetor Direction que calculamos
+      // Multiplicamos a escala para que a linha tenha um comprimento visível no espaço (ex: 1.0f)
+      elModel = glm::scale(elModel, glm::vec3(1.0f, 1.0f, 1.0f));
+
+      glUniformMatrix4fv(glGetUniformLocation(laserShader.ID, "model"), 1, GL_FALSE, glm::value_ptr(elModel));
+
+      // Desenha a linha vermelha usando o VAO genérico de laser
+      glDrawArrays(GL_LINES, 0, 2);
+    }
+    glLineWidth(1.0f); // Reseta a largura da linha padrão
+
+    // glUniform3f(glGetUniformLocation(laserShader.ID, "laserColor"), 1.0f, 0.0f, 0.0f); // Vermelho Puro
+    // glLineWidth(4.0f);
+    // for (const auto &eLaser : activeEnemyLasers)
+    // {
+    //   glm::mat4 elModel = glm::inverse(glm::lookAt(eLaser.Position, eLaser.Position + eLaser.Direction, glm::vec3(0.0f, 1.0f, 0.0f)));
+    //   elModel[3] = glm::vec4(eLaser.Position, 1.0f);
+    //   glUniformMatrix4fv(glGetUniformLocation(laserShader.ID, "model"), 1, GL_FALSE, glm::value_ptr(elModel));
+    //   glDrawArrays(GL_LINES, 0, 2);
+    // }
+    // glLineWidth(1.0f); // Reseta a largura da linha
 
     glfwSwapBuffers(window);
     glfwPollEvents();
@@ -355,7 +413,6 @@ int main()
   glfwTerminate();
   return 0;
 }
-
 void processInput(GLFWwindow *window)
 {
   if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
