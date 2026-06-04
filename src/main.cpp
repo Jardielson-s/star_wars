@@ -274,32 +274,38 @@ int main()
     glDepthMask(GL_TRUE);
 
     // 2. DESENHAR O MODELO IMPORTADO (Nave Inimiga)
+    // 2. DESENHAR O MODELO IMPORTADO (Nave Inimiga)
     if (enemyTarget.IsAlive)
     {
       objectShader.use();
+
+      // --- CONFIGURAÇÃO DA ILUMINAÇÃO DE PHONG ---
+      // Definimos uma fonte de luz estática no espaço (um Sol acima e ligeiramente à direita)
+      glm::vec3 luzPosicao(5.0f, 10.0f, 2.0f);
+
+      // Enviando as variáveis de luz e câmera para o Fragment Shader
+      glUniform3fv(glGetUniformLocation(objectShader.ID, "lightPos"), 1, glm::value_ptr(luzPosicao));
+      glUniform3fv(glGetUniformLocation(objectShader.ID, "viewPos"), 1, glm::value_ptr(camera.Position));
+      glUniform3f(glGetUniformLocation(objectShader.ID, "lightColor"), 1.0f, 1.0f, 1.0f);  // Luz Branca
+      glUniform3f(glGetUniformLocation(objectShader.ID, "objectColor"), 0.7f, 0.7f, 0.8f); // Nave Cinza Espacial
+
+      // CONFIGURAÇÃO DAS MATRIZES (Sua lógica idêntica e calibrada anteriormente)
       glm::mat4 model = glm::mat4(1.0f);
-
-      // PASSO 1: Posiciona a nave na coordenada física do jogo
       model = glm::translate(model, enemyTarget.Position);
-
-      // PASSO 2: ROTAÇÃO DE ALINHAMENTO FIXO
-      // Removemos o glfwGetTime(). Agora a nave não gira mais feito pião.
-      // Se com 180 graus ela ainda não estiver de frente para você,
-      // mude esse valor para 0.0f, 90.0f ou -90.0f até ela cravar os olhos na sua câmera.
       model = glm::rotate(model, glm::radians(80.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
-      // PASSO 3: ESCALA LOCAL
       float escalaNave = 0.15f;
       model = glm::scale(model, glm::vec3(escalaNave, escalaNave, escalaNave));
-
-      // PASSO 4: CORREÇÃO MANUAL DE PIVÔ LOCAL
       model = glm::translate(model, glm::vec3(0.0f, 0.0f, 0.0f));
 
       glUniformMatrix4fv(glGetUniformLocation(objectShader.ID, "model"), 1, GL_FALSE, glm::value_ptr(model));
       glUniformMatrix4fv(glGetUniformLocation(objectShader.ID, "view"), 1, GL_FALSE, glm::value_ptr(view));
       glUniformMatrix4fv(glGetUniformLocation(objectShader.ID, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
-      glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+      // --- MUDANÇA CRUCIAL: Mudar de GL_LINE para GL_FILL ---
+      // Saímos do modo aramado neon para renderizar a lataria sólida do modelo com sombreamento!
+      glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
       enemyModel.Draw(objectShader);
     }
 
