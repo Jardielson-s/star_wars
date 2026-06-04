@@ -1,0 +1,33 @@
+{
+  "tasks": [
+    {
+      "type": "cppbuild",
+      "label": "C/C++: gcc arquivo de build ativo",
+      "command": "/usr/bin/gcc",
+      "args": [
+        "-fdiagnostics-color=always",
+        "-g",
+        "${file}",
+        "-o",
+        "${fileDirname}/${fileBasenameNoExtension}",
+        "${workspaceFolder}/src/main.cpp",
+        "${workspaceFolder}/src/glad.c",
+        "-lglfw3dll",
+        "-o",
+        "${workspaceFolder}/cutable.exe"
+      ],
+      "options": {
+        "cwd": "${fileDirname}"
+      },
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "detail": "Tarefa gerada pelo Depurador."
+    }
+  ],
+  "version": "2.0.0"
+}
