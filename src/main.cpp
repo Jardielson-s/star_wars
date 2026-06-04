@@ -56,6 +56,21 @@ struct Particle
 };
 std::vector<Particle> activeParticles;
 
+// --- ESTADO DO JOGADOR E DO JOGO ---
+struct Player
+{
+  int HP = 100;
+  int MaxHP = 100;
+  bool IsAlive = true;
+};
+Player player;
+
+enum GameState
+{
+  PLAYING,
+  GAME_OVER
+};
+GameState currentGameState = PLAYING;
 // Função auxiliar para gerar a explosão
 void spawnExplosion(glm::vec3 position)
 {
@@ -178,35 +193,38 @@ int main()
 
     processInput(window);
 
-    // 1. MOTOR DE MOVIMENTAÇÃO DA NAVE INIMIGA
-    if (enemyTarget.IsAlive)
+    if (currentGameState == PLAYING)
     {
-      float tempo = static_cast<float>(glfwGetTime());
-      enemyTarget.Position.x = sin(tempo * 1.5f) * 3.0f;
-      enemyTarget.Position.y = cos(tempo * 2.0f) * 1.8f;
-    }
-    else
-    {
-      enemyTarget.RespawnTimer -= deltaTime;
-      if (enemyTarget.RespawnTimer <= 0.0f)
+      // 1. MOTOR DE MOVIMENTAÇÃO DA NAVE INIMIGA
+      if (enemyTarget.IsAlive)
       {
-        enemyTarget.IsAlive = true;
+        float tempo = static_cast<float>(glfwGetTime());
+        enemyTarget.Position.x = sin(tempo * 1.5f) * 3.0f;
+        enemyTarget.Position.y = cos(tempo * 2.0f) * 1.8f;
       }
-    }
-
-    // 2. INTELIGÊNCIA INIMIGA: ATACAR O JOGADOR
-    if (enemyTarget.IsAlive)
-    {
-      float currentTime = static_cast<float>(glfwGetTime());
-      if (currentTime - lastEnemyShotTime >= ENEMY_SHOT_COOLDOWN)
+      else
       {
-        EnemyLaser el;
-        el.Position = enemyTarget.Position;
-        el.Direction = glm::normalize(camera.Position - enemyTarget.Position);
-        el.LifeTime = 4.0f;
+        enemyTarget.RespawnTimer -= deltaTime;
+        if (enemyTarget.RespawnTimer <= 0.0f)
+        {
+          enemyTarget.IsAlive = true;
+        }
+      }
 
-        activeEnemyLasers.push_back(el);
-        lastEnemyShotTime = currentTime;
+      // 2. INTELIGÊNCIA INIMIGA: ATACAR O JOGADOR
+      if (enemyTarget.IsAlive)
+      {
+        float currentTime = static_cast<float>(glfwGetTime());
+        if (currentTime - lastEnemyShotTime >= ENEMY_SHOT_COOLDOWN)
+        {
+          EnemyLaser el;
+          el.Position = enemyTarget.Position;
+          el.Direction = glm::normalize(camera.Position - enemyTarget.Position);
+          el.LifeTime = 4.0f;
+
+          activeEnemyLasers.push_back(el);
+          lastEnemyShotTime = currentTime;
+        }
       }
     }
 
@@ -216,14 +234,32 @@ int main()
       it->Position += it->Direction * 20.0f * deltaTime;
       it->LifeTime -= deltaTime;
 
+      // DETECÇÃO DE COLISÃO COM O JOGADOR
       float distToPlayer = glm::distance(it->Position, camera.Position);
       if (distToPlayer < 0.8f)
       {
-        std::cout << "\n[ALERTA] VOCÊ FOI ATINGIDO PELO INIMIGO!" << std::endl;
+        if (currentGameState == PLAYING)
+        {
+          player.HP -= 20; // Cada tiro inimigo tira 20 de HP
+          std::cout << "\n[ALERTA] VOCÊ FOI ATINGIDO! HP: " << player.HP << "/100" << std::endl;
+
+          if (player.HP <= 0)
+          {
+            player.HP = 0;
+            player.IsAlive = false;
+            currentGameState = GAME_OVER;
+
+            std::cout << "\n===================================" << std::endl;
+            std::cout << "            GAME OVER!             " << std::endl;
+            std::cout << " Pressione 'R' para tentar de novo " << std::endl;
+            std::cout << "===================================\n"
+                      << std::endl;
+          }
+        }
+
         it = activeEnemyLasers.erase(it);
         continue;
       }
-
       if (it->LifeTime <= 0.0f)
       {
         it = activeEnemyLasers.erase(it);
@@ -417,6 +453,34 @@ void processInput(GLFWwindow *window)
 {
   if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
     glfwSetWindowShouldClose(window, true);
+
+  // Se o jogo acabou, o jogador só pode interagir para reiniciar
+  if (currentGameState == GAME_OVER)
+  {
+    if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS)
+    {
+      // --- REINICIAR O JOGO ---
+      player.HP = 100;
+      player.IsAlive = true;
+      score = 0; // Reseta a pontuação
+      activeLasers.clear();
+      activeEnemyLasers.clear();
+      activeParticles.clear();
+
+      enemyTarget.Position = glm::vec3(0.0f, 0.0f, -5.0f);
+      enemyTarget.IsAlive = true;
+
+      currentGameState = PLAYING;
+      std::cout << "\n===================================" << std::endl;
+      std::cout << "        PARTIDA REINICIADA!        " << std::endl;
+      std::cout << "===================================\n"
+                << std::endl;
+    }
+    return; // Bloqueia qualquer outra movimentação ou tiro
+  }
+
+  // --- MOVIMENTAÇÃO DA CÂMERA (Só roda se estiver VIVO/PLAYING) ---
+  float cameraSpeed = static_cast<float>(2.5f * deltaTime);
   if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
     camera.ProcessKeyboard(FORWARD, deltaTime);
   if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
