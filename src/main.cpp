@@ -46,6 +46,23 @@ std::vector<EnemyLaser> activeEnemyLasers;
 float lastEnemyShotTime = 0.0f;
 const float ENEMY_SHOT_COOLDOWN = 1.8f; // Tempo em segundos entre os tiros da nave
 
+// --- SISTEMA DE ONDAS E MÚLTIPLOS INIMIGOS ---
+struct Enemy
+{
+  glm::vec3 Position;
+  float Radius = 1.2f;
+  bool IsAlive = true;
+  float PhaseOffset; // Deslocamento de tempo para movimentos variados
+  float SpeedMultiplier;
+};
+
+std::vector<Enemy> activeEnemies;
+
+int currentWave = 1;
+bool waveCleared = false;
+float waveTransitionTimer = 0.0f;
+const float WAVE_DELAY = 2.0f; // Tempo de espera entre as ondas
+
 // Estrutura de Partículas para a Explosão
 struct Particle
 {
@@ -116,6 +133,7 @@ unsigned int score = 0;
 void framebuffer_size_callback(GLFWwindow *window, int width, int height);
 void mouse_callback(GLFWwindow *window, double xpos, double ypos);
 void processInput(GLFWwindow *window);
+void spawnWave(int waveNumber);
 
 int main()
 {
@@ -206,6 +224,9 @@ int main()
   glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
   glEnableVertexAttribArray(0);
 
+  // Inicializa a primeira onda de inimigos antes do loop começar
+  spawnWave(currentWave);
+
   // --- GAME LOOP ---
   while (!glfwWindowShouldClose(window))
   {
@@ -215,37 +236,50 @@ int main()
 
     processInput(window);
 
+    // Só processa o comportamento dos inimigos se o jogo estiver rodando
     if (currentGameState == PLAYING)
     {
-      // 1. MOTOR DE MOVIMENTAÇÃO DA NAVE INIMIGA
-      if (enemyTarget.IsAlive)
-      {
-        float tempo = static_cast<float>(glfwGetTime());
-        enemyTarget.Position.x = sin(tempo * 1.5f) * 3.0f;
-        enemyTarget.Position.y = cos(tempo * 2.0f) * 1.8f;
-      }
-      else
-      {
-        enemyTarget.RespawnTimer -= deltaTime;
-        if (enemyTarget.RespawnTimer <= 0.0f)
-        {
-          enemyTarget.IsAlive = true;
-        }
-      }
+      bool anyEnemyAlive = false;
 
-      // 2. INTELIGÊNCIA INIMIGA: ATACAR O JOGADOR
-      if (enemyTarget.IsAlive)
+      // Loop para mover e fazer cada nave viva atirar
+      for (auto &enemy : activeEnemies)
       {
+        if (!enemy.IsAlive)
+          continue;
+
+        anyEnemyAlive = true; // Achou pelo menos uma nave viva
+
+        // 1. MOTOR DE MOVIMENTAÇÃO INDIVIDUAL (Usando PhaseOffset)
+        float tempo = static_cast<float>(glfwGetTime()) * enemy.SpeedMultiplier;
+        enemy.Position.x = sin(tempo * 1.5f + enemy.PhaseOffset) * 4.0f;
+        enemy.Position.y = cos(tempo * 2.0f + enemy.PhaseOffset) * 1.8f;
+
+        // 2. INTELIGÊNCIA INIMIGA: CADA NAVE ATIRA INDEPENDENTEMENTE
         float currentTime = static_cast<float>(glfwGetTime());
-        if (currentTime - lastEnemyShotTime >= ENEMY_SHOT_COOLDOWN)
+        // Adicionamos um fator aleatório baseado no PhaseOffset para que não atirem todas no exato mesmo milissegundo
+        if (currentTime - lastEnemyShotTime >= (ENEMY_SHOT_COOLDOWN + (sin(enemy.PhaseOffset) * 0.3f)))
         {
           EnemyLaser el;
-          el.Position = enemyTarget.Position;
-          el.Direction = glm::normalize(camera.Position - enemyTarget.Position);
+          el.Position = enemy.Position;
+          el.Direction = glm::normalize(camera.Position - enemy.Position);
           el.LifeTime = 4.0f;
 
           activeEnemyLasers.push_back(el);
+          // O cooldown global é resetado, mas mitigado pelo offset individual acima
           lastEnemyShotTime = currentTime;
+        }
+      }
+
+      // --- SISTEMA DE TRANSIÇÃO DE ONDAS ---
+      // Se todas as naves da onda atual morreram...
+      if (!anyEnemyAlive)
+      {
+        waveTransitionTimer += deltaTime;
+        if (waveTransitionTimer >= WAVE_DELAY)
+        {
+          currentWave++;
+          spawnWave(currentWave);
+          waveTransitionTimer = 0.0f;
         }
       }
     }
@@ -292,7 +326,7 @@ int main()
       }
     }
 
-    // 4. MOTOR DE FÍSICA DOS LASERS DO JOGADOR (SUB-STEPPING)
+    // 4. MOTOR DE FÍSICA DOS LASERS DO JOGADOR (SUB-STEPPING MULTI-ALVO)
     for (auto it = activeLasers.begin(); it != activeLasers.end();)
     {
       bool laserDestroyed = false;
@@ -303,29 +337,29 @@ int main()
       {
         it->Position += stepMove;
 
-        if (enemyTarget.IsAlive)
+        // Checa colisão contra CADA inimigo do vetor
+        for (auto &enemy : activeEnemies)
         {
-          float dist = glm::distance(it->Position, enemyTarget.Position);
-
-          if (dist < enemyTarget.Radius)
+          if (enemy.IsAlive)
           {
-            std::cout << "\n===================================" << std::endl;
-            std::cout << "ALVO DESTRUÍDO!" << std::endl;
-            score++;
-            std::cout << "SCORE: " << score << std::endl;
-            std::cout << "===================================\n"
-                      << std::endl;
+            float dist = glm::distance(it->Position, enemy.Position);
 
-            spawnExplosion(enemyTarget.Position);
-            activeEnemyLasers.clear(); // Limpa tiros remanescentes
+            if (dist < enemy.Radius)
+            {
+              std::cout << "\n[ACERTO] UMA NAVE INIMIGA FOI DESTRUÍDA!" << std::endl;
+              score++;
+              std::cout << "SCORE ATUAL: " << score << std::endl;
 
-            enemyTarget.IsAlive = false;
-            enemyTarget.RespawnTimer = enemyTarget.RespawnDelay;
+              spawnExplosion(enemy.Position);
 
-            laserDestroyed = true;
-            break;
+              enemy.IsAlive = false; // Mata este inimigo específico
+              laserDestroyed = true;
+              break;
+            }
           }
         }
+        if (laserDestroyed)
+          break;
       }
 
       it->LifeTime -= deltaTime;
@@ -339,7 +373,6 @@ int main()
         ++it;
       }
     }
-
     // 5. MOTOR DE FÍSICA DAS PARTÍCULAS
     for (auto it = activeParticles.begin(); it != activeParticles.end();)
     {
@@ -376,25 +409,32 @@ int main()
     // PASSO 2: DESENHAR A NAVE INIMIGA
     if (enemyTarget.IsAlive)
     {
+      // PASSO 2: DESENHAR TODAS AS NAVES INIMIGAS VIVAS
       objectShader.use();
       glm::vec3 luzPosicao(5.0f, 10.0f, 2.0f);
-
       glUniform3fv(glGetUniformLocation(objectShader.ID, "lightPos"), 1, glm::value_ptr(luzPosicao));
       glUniform3fv(glGetUniformLocation(objectShader.ID, "viewPos"), 1, glm::value_ptr(camera.Position));
       glUniform3f(glGetUniformLocation(objectShader.ID, "lightColor"), 1.0f, 1.0f, 1.0f);
 
-      glm::mat4 model = glm::mat4(1.0f);
-      model = glm::translate(model, enemyTarget.Position);
-      model = glm::rotate(model, glm::radians(80.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-      float escalaNave = 0.15f;
-      model = glm::scale(model, glm::vec3(escalaNave, escalaNave, escalaNave));
-
-      glUniformMatrix4fv(glGetUniformLocation(objectShader.ID, "model"), 1, GL_FALSE, glm::value_ptr(model));
-      glUniformMatrix4fv(glGetUniformLocation(objectShader.ID, "view"), 1, GL_FALSE, glm::value_ptr(view));
-      glUniformMatrix4fv(glGetUniformLocation(objectShader.ID, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
-
       glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-      enemyModel.Draw(objectShader);
+
+      for (const auto &enemy : activeEnemies)
+      {
+        if (!enemy.IsAlive)
+          continue;
+
+        glm::mat4 model = glm::mat4(1.0f);
+        model = glm::translate(model, enemy.Position);
+        model = glm::rotate(model, glm::radians(80.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        float escalaNave = 0.15f;
+        model = glm::scale(model, glm::vec3(escalaNave, escalaNave, escalaNave));
+
+        glUniformMatrix4fv(glGetUniformLocation(objectShader.ID, "model"), 1, GL_FALSE, glm::value_ptr(model));
+        glUniformMatrix4fv(glGetUniformLocation(objectShader.ID, "view"), 1, GL_FALSE, glm::value_ptr(view));
+        glUniformMatrix4fv(glGetUniformLocation(objectShader.ID, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
+
+        enemyModel.Draw(objectShader);
+      }
     }
 
     // PASSO 3: DESENHAR AS PARTÍCULAS DA EXPLOSÃO
@@ -622,4 +662,32 @@ void mouse_callback(GLFWwindow *window, double xposIn, double yposIn)
 void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
   glViewport(0, 0, width, height);
+}
+
+void spawnWave(int waveNumber)
+{
+  activeEnemies.clear();
+  activeEnemyLasers.clear(); // Limpa tiros antigos para ser justo
+
+  // Fórmula: Começa com 2 naves na Onda 1, e adiciona 1 nave por onda
+  int numEnemies = 1 + waveNumber;
+
+  for (int i = 0; i < numEnemies; i++)
+  {
+    Enemy e;
+    // Espalha os inimigos em posições diferentes no eixo X e Y
+    float offsetX = (i - (numEnemies - 1) / 2.0f) * 3.5f;
+    e.Position = glm::vec3(offsetX, (rand() % 20 - 10) * 0.1f, -15.0f - (i * 2.0f));
+    e.Radius = 1.2f;
+    e.IsAlive = true;
+    e.PhaseOffset = i * 1.5f;                       // Garante que cada nave dance em um ritmo diferente
+    e.SpeedMultiplier = 1.0f + (waveNumber * 0.1f); // Ficam mais rápidas a cada onda
+
+    activeEnemies.push_back(e);
+  }
+  std::cout << "\n===================================" << std::endl;
+  std::cout << "         INICIANDO ONDA " << currentWave << "         " << std::endl;
+  std::cout << "        PREPARE-SE PARA O COMBATE!  " << std::endl;
+  std::cout << "===================================\n"
+            << std::endl;
 }
