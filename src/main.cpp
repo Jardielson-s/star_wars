@@ -10,6 +10,13 @@
 #include <iostream>
 #include <vector>
 #include <ctime>
+#include "soloud.h"
+#include "soloud_wav.h"
+
+SoLoud::Soloud soloud;
+SoLoud::Wav soundLaser;
+SoLoud::Wav soundExplosion;
+SoLoud::Wav soundEnemyLaser;
 
 const unsigned int SCREEN_WIDTH = 1280;
 const unsigned int SCREEN_HEIGHT = 720;
@@ -134,6 +141,7 @@ void framebuffer_size_callback(GLFWwindow *window, int width, int height);
 void mouse_callback(GLFWwindow *window, double xpos, double ypos);
 void processInput(GLFWwindow *window);
 void spawnWave(int waveNumber);
+void initAudio();
 
 int main()
 {
@@ -143,6 +151,12 @@ int main()
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+  // soloud.init();
+  initAudio();
+  // Carrega os arquivos (certifique-se de que existem na pasta)
+  // soundLaser.load("assets/laser.wav");
+  // soundExplosion.load("audio/tokyo_drift.wav");
 
   GLFWwindow *window = glfwCreateWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Star Wars Engine - Stage 7 (Assimp Loader)", NULL, NULL);
   if (window == NULL)
@@ -351,7 +365,7 @@ int main()
               std::cout << "SCORE ATUAL: " << score << std::endl;
 
               spawnExplosion(enemy.Position);
-
+              soloud.play(soundExplosion);
               enemy.IsAlive = false; // Mata este inimigo específico
               laserDestroyed = true;
               break;
@@ -577,6 +591,7 @@ int main()
     glfwPollEvents();
   }
 
+  soloud.deinit();
   glDeleteVertexArrays(1, &hudVAO);
   glDeleteBuffers(1, &hudVBO);
   glDeleteVertexArrays(1, &skyboxVAO);
@@ -632,6 +647,7 @@ void processInput(GLFWwindow *window)
     float currentTime = static_cast<float>(glfwGetTime());
     if (currentTime - lastShotTime >= SHOT_COOLDOWN)
     {
+      soloud.play(soundLaser);
       Laser newLaser;
       newLaser.Position = camera.Position + (camera.Front * 0.5f) - (camera.Up * 0.2f);
       newLaser.Direction = camera.Front;
@@ -690,4 +706,23 @@ void spawnWave(int waveNumber)
   std::cout << "        PREPARE-SE PARA O COMBATE!  " << std::endl;
   std::cout << "===================================\n"
             << std::endl;
+}
+
+void initAudio()
+{
+
+  if (soloud.init() != SoLoud::SO_NO_ERROR)
+  {
+    std::cerr << "Falha ao inicializar o SoLoud!" << std::endl;
+  }
+
+  if (soundExplosion.load("audio/explosion.wav") != SoLoud::SO_NO_ERROR)
+  {
+    std::cerr << "Erro: Nao foi possivel carregar o arquivo de audio!" << std::endl;
+  }
+
+  if (soundLaser.load("audio/attack_laser.wav") != SoLoud::SO_NO_ERROR)
+  {
+    std::cerr << "Erro: Nao foi possivel carregar o arquivo de audio!" << std::endl;
+  }
 }
