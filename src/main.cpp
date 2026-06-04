@@ -176,6 +176,28 @@ int main()
   glEnableVertexAttribArray(0);
 
   unsigned int laserVAO, laserVBO;
+  // Inicialização do Shader do HUD
+  Shader hudShader("shaders/hud.vs", "shaders/hud.fs");
+
+  // Vértices de um quadrado/retângulo 2D na origem (0,0) até (1,1)
+  float hudVertices[] = {
+      0.0f, 1.0f, // Canto superior esquerdo
+      0.0f, 0.0f, // Canto inferior esquerdo
+      1.0f, 0.0f, // Canto inferior direito
+
+      0.0f, 1.0f, // Canto superior esquerdo
+      1.0f, 0.0f, // Canto inferior direito
+      1.0f, 1.0f  // Canto superior direito
+  };
+
+  unsigned int hudVAO, hudVBO;
+  glGenVertexArrays(1, &hudVAO);
+  glGenBuffers(1, &hudVBO);
+  glBindVertexArray(hudVAO);
+  glBindBuffer(GL_ARRAY_BUFFER, hudVBO);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(hudVertices), hudVertices, GL_STATIC_DRAW);
+  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)0);
+  glEnableVertexAttribArray(0);
   glGenVertexArrays(1, &laserVAO);
   glGenBuffers(1, &laserVBO);
   glBindVertexArray(laserVAO);
@@ -438,10 +460,85 @@ int main()
     // }
     // glLineWidth(1.0f); // Reseta a largura da linha
 
+    // =================================================================
+    // PASSO 6: RENDERIZAR INTERFACE GRÁFICA (HUD 2D)
+    // =================================================================
+    // Desativamos o Depth Test para que a interface seja desenhada
+    // POR CIMA de todo o universo 3D, sem ser cortada por estrelas ou naves.
+    glDisable(GL_DEPTH_TEST);
+
+    hudShader.use();
+
+    // Criamos uma matriz ortográfica mapeando diretamente os píxeis da janela
+    // Canto esquerdo: 0, Canto direito: SCREEN_WIDTH, Baixo: SCREEN_HEIGHT, Topo: 0
+    glm::mat4 projection2D = glm::ortho(0.0f, (float)SCREEN_WIDTH, (float)SCREEN_HEIGHT, 0.0f, -1.0f, 1.0f);
+    glUniformMatrix4fv(glGetUniformLocation(hudShader.ID, "projection2D"), 1, GL_FALSE, glm::value_ptr(projection2D));
+
+    glBindVertexArray(hudVAO);
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+    // -----------------------------------------------------------------
+    // A. DESENHAR O FUNDO DA BARRA DE VIDA (MOLDURA PRETA/CINZENTA)
+    // -----------------------------------------------------------------
+    glm::mat4 hudModel = glm::mat4(1.0f);
+    hudModel = glm::translate(hudModel, glm::vec3(30.0f, 30.0f, 0.0f)); // Posição: Margem de 30px do topo esquerdo
+    hudModel = glm::scale(hudModel, glm::vec3(200.0f, 25.0f, 1.0f));    // Tamanho: 200px de largura por 25px de altura
+    glUniformMatrix4fv(glGetUniformLocation(hudShader.ID, "projection2D"), 1, GL_FALSE, glm::value_ptr(projection2D * hudModel));
+
+    glUniform3f(glGetUniformLocation(hudShader.ID, "hudColor"), 0.15f, 0.15f, 0.15f); // Cor cinzenta escura
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+
+    // -----------------------------------------------------------------
+    // B. DESENHAR A BARRA DE VIDA PREENCHIDA (DINÂMICA)
+    // -----------------------------------------------------------------
+    if (player.HP > 0)
+    {
+      // Calcula a largura proporcional ao HP atual do jogador (ex: 100 HP = 1.0 * 200px = 200px)
+      float hpPercent = (float)player.HP / (float)player.MaxHP;
+      float barraLargura = 200.0f * hpPercent;
+
+      hudModel = glm::mat4(1.0f);
+      hudModel = glm::translate(hudModel, glm::vec3(30.0f, 30.0f, 0.0f));    // Mesma posição de origem
+      hudModel = glm::scale(hudModel, glm::vec3(barraLargura, 25.0f, 1.0f)); // Largura encolhe com o dano
+      glUniformMatrix4fv(glGetUniformLocation(hudShader.ID, "projection2D"), 1, GL_FALSE, glm::value_ptr(projection2D * hudModel));
+
+      // Efeito Arcade: A barra fica vermelha se a vida estiver abaixo de 30%, senão fica verde brilhante
+      if (player.HP <= 30)
+      {
+        glUniform3f(glGetUniformLocation(hudShader.ID, "hudColor"), 1.0f, 0.0f, 0.0f); // Vermelho Perigo
+      }
+      else
+      {
+        glUniform3f(glGetUniformLocation(hudShader.ID, "hudColor"), 0.0f, 0.8f, 0.2f); // Verde Saudável
+      }
+
+      glDrawArrays(GL_TRIANGLES, 0, 6);
+    }
+
+    // -----------------------------------------------------------------
+    // C. SE ESTIVER EM GAME OVER: DESENHAR UM PAINEL DE DERROTA
+    // -----------------------------------------------------------------
+    if (currentGameState == GAME_OVER)
+    {
+      // Desenha um retângulo vermelho translúcido/escuro cobrindo o centro do ecrã
+      hudModel = glm::mat4(1.0f);
+      hudModel = glm::translate(hudModel, glm::vec3((SCREEN_WIDTH / 2.0f) - 150.0f, (SCREEN_HEIGHT / 2.0f) - 40.0f, 0.0f));
+      hudModel = glm::scale(hudModel, glm::vec3(300.0f, 80.0f, 1.0f));
+      glUniformMatrix4fv(glGetUniformLocation(hudShader.ID, "projection2D"), 1, GL_FALSE, glm::value_ptr(projection2D * hudModel));
+
+      glUniform3f(glGetUniformLocation(hudShader.ID, "hudColor"), 0.5f, 0.0f, 0.0f); // Vermelho Escuro
+      glDrawArrays(GL_TRIANGLES, 0, 6);
+    }
+
+    // Reativamos o DEPTH TEST para que o renderizador 3D do próximo frame funcione perfeitamente
+    glEnable(GL_DEPTH_TEST);
+
     glfwSwapBuffers(window);
     glfwPollEvents();
   }
 
+  glDeleteVertexArrays(1, &hudVAO);
+  glDeleteBuffers(1, &hudVBO);
   glDeleteVertexArrays(1, &skyboxVAO);
   glDeleteBuffers(1, &skyboxVBO);
   glDeleteVertexArrays(1, &laserVAO);
