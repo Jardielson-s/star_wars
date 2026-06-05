@@ -3,6 +3,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtx/string_cast.hpp>
 
 #include "Shader.h"
 #include "Camera.h"
@@ -17,6 +18,7 @@ SoLoud::Soloud soloud;
 SoLoud::Wav soundLaser;
 SoLoud::Wav soundExplosion;
 SoLoud::Wav soundEnemyLaser;
+SoLoud::Wav soundGodzillaBlast;
 
 const unsigned int SCREEN_WIDTH = 1280;
 const unsigned int SCREEN_HEIGHT = 720;
@@ -37,6 +39,9 @@ struct Laser
   glm::vec3 Position;
   glm::vec3 Direction;
   float LifeTime;
+  bool IsSpecial = false;
+  int Damage;
+  int Scale;
 };
 std::vector<Laser> activeLasers;
 float lastShotTime = 0.0f;
@@ -69,6 +74,12 @@ int currentWave = 1;
 bool waveCleared = false;
 float waveTransitionTimer = 0.0f;
 const float WAVE_DELAY = 2.0f; // Tempo de espera entre as ondas
+
+int killCount = 0;
+bool canUseSpecial = false;
+bool isChargingSpecial = false;
+float chargeTimer = 0.0f;
+const float CHARGE_TIME = 26.0f;
 
 // Estrutura de Partículas para a Explosão
 struct Particle
@@ -142,6 +153,9 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos);
 void processInput(GLFWwindow *window);
 void spawnWave(int waveNumber);
 void initAudio();
+void dispararLaserEspecial();
+void spawnParticle(glm::vec3 position, glm::vec3 velocity);
+void stopGodzillaSound(unsigned int godzillaHandle);
 
 int main()
 {
@@ -240,7 +254,7 @@ int main()
 
   // Inicializa a primeira onda de inimigos antes do loop começar
   spawnWave(currentWave);
-
+  unsigned int godzillaHandle = 0;
   // --- GAME LOOP ---
   while (!glfwWindowShouldClose(window))
   {
@@ -311,7 +325,7 @@ int main()
         if (currentGameState == PLAYING)
         {
           player.HP -= 20; // Cada tiro inimigo tira 20 de HP
-          std::cout << "\n[ALERTA] VOCÊ FOI ATINGIDO! HP: " << player.HP << "/100" << std::endl;
+          // std::cout << "\n[ALERTA] VOCÊ FOI ATINGIDO! HP: " << player.HP << "/100" << std::endl;
 
           if (player.HP <= 0)
           {
@@ -351,6 +365,7 @@ int main()
       {
         it->Position += stepMove;
 
+        float raioColisao = it->IsSpecial ? 3.0f : 0.5f;
         // Checa colisão contra CADA inimigo do vetor
         for (auto &enemy : activeEnemies)
         {
@@ -358,11 +373,19 @@ int main()
           {
             float dist = glm::distance(it->Position, enemy.Position);
 
-            if (dist < enemy.Radius)
+            if (dist < (enemy.Radius + raioColisao))
             {
-              std::cout << "\n[ACERTO] UMA NAVE INIMIGA FOI DESTRUÍDA!" << std::endl;
+              killCount++;
+              // std::cout << "Kills: " << killCount << "/2" << std::endl;
+
+              if (killCount >= 2)
+              { // Era 2, mudei para 5 conforme sua ideia
+                canUseSpecial = true;
+                // Não resetar aqui, vamos resetar apenas quando disparar o especial
+              }
+              // std::cout << "\n[ACERTO] UMA NAVE INIMIGA FOI DESTRUÍDA!" << std::endl;
               score++;
-              std::cout << "SCORE ATUAL: " << score << std::endl;
+              // std::cout << "SCORE ATUAL: " << score << std::endl;
 
               spawnExplosion(enemy.Position);
               soloud.play(soundExplosion);
@@ -372,6 +395,14 @@ int main()
             }
           }
         }
+
+        if (killCount >= 2)
+        {
+          canUseSpecial = true;
+          killCount = 0; // Reseta o contador
+          std::cout << "[INFO] ESPECIAL CARREGADO! Pressione 'E' para carregar." << std::endl;
+        }
+
         if (laserDestroyed)
           break;
       }
@@ -387,9 +418,57 @@ int main()
         ++it;
       }
     }
+
+    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS && canUseSpecial)
+    {
+      if (!isChargingSpecial)
+      {
+        isChargingSpecial = true;
+        chargeTimer = 0.0f;
+        godzillaHandle = soloud.play(soundGodzillaBlast, 10.0f); // Som de início de carga
+      }
+
+      chargeTimer += deltaTime;
+
+      // Se atingiu o tempo máximo, dispara
+      if (chargeTimer >= CHARGE_TIME)
+      {
+        dispararLaserEspecial();
+        isChargingSpecial = false;
+        canUseSpecial = false; // Desativa até ganhar mais kills
+        chargeTimer = 0.0f;
+      }
+    }
+    else if (isChargingSpecial)
+    {
+      // Se soltou a tecla 'E' antes dos segundos necessários, cancela o especial
+      isChargingSpecial = false;
+      chargeTimer = 0.0f;
+      stopGodzillaSound(godzillaHandle);
+    }
+
+    // B. Processamento do carregamento
+    if (isChargingSpecial)
+    {
+      chargeTimer += deltaTime;
+      if (chargeTimer >= CHARGE_TIME)
+      {
+        dispararLaserEspecial();
+        isChargingSpecial = false;
+        canUseSpecial = false; // Desativa até ganhar mais kills
+        std::cout << "[INFO] ESPECIAL DISPARADO!" << std::endl;
+        chargeTimer = 0.0f;
+      }
+    }
+
     // 5. MOTOR DE FÍSICA DAS PARTÍCULAS
     for (auto it = activeParticles.begin(); it != activeParticles.end();)
     {
+      std::string strVet = glm::to_string(it->Color);
+      const char *charVet = strVet.c_str();
+
+      std::cout << charVet << std::endl;
+
       it->Position += it->Velocity * deltaTime;
       it->LifeTime -= deltaTime;
       it->Color.a = it->LifeTime;
@@ -477,9 +556,37 @@ int main()
       lModel[3] = glm::vec4(laser.Position, 1.0f);
       glUniformMatrix4fv(glGetUniformLocation(laserShader.ID, "model"), 1, GL_FALSE, glm::value_ptr(lModel));
       glDrawArrays(GL_LINES, 0, 2);
-    }
 
-    // PASSO 5: DESENHAR OS LASERS INIMIGOS (VERMELHOS)
+      if (laser.IsSpecial)
+      {
+        // 1. Aumenta a espessura drasticamente
+        glLineWidth(6000.0f);
+
+        // 2. Cor vibrante de plasma
+        glUniform3f(glGetUniformLocation(laserShader.ID, "laserColor"), 0.0f, 1.0f, 1.0f);
+
+        glm::mat4 bModel = glm::mat4(190.0f);
+        bModel = glm::translate(bModel, laser.Position);
+
+        // 3. ESCALA NO EIXO Z para alongar o laser (Kamehameha longo)
+        // O valor 20.0f vai esticar o laser para frente
+        bModel = glm::scale(bModel, glm::vec3(100.0f, 100.0f, 100.0f));
+
+        glUniformMatrix4fv(glGetUniformLocation(laserShader.ID, "model"), 1, GL_FALSE, glm::value_ptr(bModel));
+
+        glDrawArrays(GL_LINES, 0, 2);
+
+        // Resetamos a largura
+        glLineWidth(3.0f);
+        glDrawArrays(GL_LINES, 0, 2);
+
+        // Efeito de partículas ao longo do raio para dar a sensação de energia
+        for (int i = 0; i < 5; i++)
+        {
+          spawnParticle(laser.Position + (laser.Direction * (float)i * 2.0f), glm::vec3(0.1f));
+        }
+      }
+    }
 
     // PASSO 5: DESENHAR O LASERS INIMIGOS (VERMELHOS)
     glUniform3f(glGetUniformLocation(laserShader.ID, "laserColor"), 1.0f, 0.0f, 0.0f); // Vermelho Puro
@@ -502,17 +609,6 @@ int main()
       glDrawArrays(GL_LINES, 0, 2);
     }
     glLineWidth(1.0f); // Reseta a largura da linha padrão
-
-    // glUniform3f(glGetUniformLocation(laserShader.ID, "laserColor"), 1.0f, 0.0f, 0.0f); // Vermelho Puro
-    // glLineWidth(4.0f);
-    // for (const auto &eLaser : activeEnemyLasers)
-    // {
-    //   glm::mat4 elModel = glm::inverse(glm::lookAt(eLaser.Position, eLaser.Position + eLaser.Direction, glm::vec3(0.0f, 1.0f, 0.0f)));
-    //   elModel[3] = glm::vec4(eLaser.Position, 1.0f);
-    //   glUniformMatrix4fv(glGetUniformLocation(laserShader.ID, "model"), 1, GL_FALSE, glm::value_ptr(elModel));
-    //   glDrawArrays(GL_LINES, 0, 2);
-    // }
-    // glLineWidth(1.0f); // Reseta a largura da linha
 
     // =================================================================
     // PASSO 6: RENDERIZAR INTERFACE GRÁFICA (HUD 2D)
@@ -570,10 +666,41 @@ int main()
     }
 
     // -----------------------------------------------------------------
+    // C. DESENHAR A BARRA DE CARREGAMENTO DO ESPECIAL (NOVO)
+    // -----------------------------------------------------------------
+    if (isChargingSpecial)
+    {
+      float chargePercent = chargeTimer / CHARGE_TIME; // 13 segundos definidos
+      float barraLargura = 200.0f * chargePercent;
+
+      // Criamos uma matriz de modelo separada para a barra especial
+      glm::mat4 specialHudModel = glm::mat4(1.0f);
+
+      // Posição: 30px da esquerda, 65px do topo (abaixo da barra de vida)
+      specialHudModel = glm::translate(specialHudModel, glm::vec3(30.0f, 65.0f, 0.0f));
+      specialHudModel = glm::scale(specialHudModel, glm::vec3(barraLargura, 10.0f, 1.0f));
+
+      // Aplica a transformação ao Shader
+      glUniformMatrix4fv(glGetUniformLocation(hudShader.ID, "projection2D"), 1, GL_FALSE, glm::value_ptr(projection2D * specialHudModel));
+
+      // Cor: Azul Neon (0.0, 0.5, 1.0)
+      glUniform3f(glGetUniformLocation(hudShader.ID, "hudColor"), 0.0f, 0.5f, 1.0f);
+
+      // Desenha a barra
+      glDrawArrays(GL_TRIANGLES, 0, 6);
+    }
+
+    // -----------------------------------------------------------------
+    // D. SE ESTIVER EM GAME OVER...
+    // -----------------------------------------------------------------
+
+    // -----------------------------------------------------------------
     // C. SE ESTIVER EM GAME OVER: DESENHAR UM PAINEL DE DERROTA
     // -----------------------------------------------------------------
     if (currentGameState == GAME_OVER)
     {
+
+      stopGodzillaSound(godzillaHandle);
       // Desenha um retângulo vermelho translúcido/escuro cobrindo o centro do ecrã
       hudModel = glm::mat4(1.0f);
       hudModel = glm::translate(hudModel, glm::vec3((SCREEN_WIDTH / 2.0f) - 150.0f, (SCREEN_HEIGHT / 2.0f) - 40.0f, 0.0f));
@@ -701,11 +828,11 @@ void spawnWave(int waveNumber)
 
     activeEnemies.push_back(e);
   }
-  std::cout << "\n===================================" << std::endl;
-  std::cout << "         INICIANDO ONDA " << currentWave << "         " << std::endl;
-  std::cout << "        PREPARE-SE PARA O COMBATE!  " << std::endl;
-  std::cout << "===================================\n"
-            << std::endl;
+  // std::cout << "\n===================================" << std::endl;
+  // std::cout << "         INICIANDO ONDA " << currentWave << "         " << std::endl;
+  // std::cout << "        PREPARE-SE PARA O COMBATE!  " << std::endl;
+  // std::cout << "===================================\n"
+  //           << std::endl;
 }
 
 void initAudio()
@@ -724,5 +851,41 @@ void initAudio()
   if (soundLaser.load("audio/attack_laser.wav") != SoLoud::SO_NO_ERROR)
   {
     std::cerr << "Erro: Nao foi possivel carregar o arquivo de audio!" << std::endl;
+  }
+
+  if (soundGodzillaBlast.load("audio/godzilla_atomic_breath.wav") != SoLoud::SO_NO_ERROR)
+  {
+    std::cerr << "Erro: Nao foi possivel carregar o arquivo de audio!" << std::endl;
+  }
+}
+
+void dispararLaserEspecial()
+{
+  Laser especial;
+  especial.Position = camera.Position;
+  especial.Direction = camera.Front;
+  especial.IsSpecial = true;    // Flag na struct do seu laser
+  especial.Damage = 1000;       // Dano massivo
+  especial.LifeTime = 10000.0f; // Garanta que ele tenha tempo de vida!
+  especial.Scale = 10000.0f;    // Certifique-se de que seu shader lê essa variável
+  activeLasers.push_back(especial);
+}
+
+void spawnParticle(glm::vec3 position, glm::vec3 velocity)
+{
+  Particle p;
+  p.Position = position;
+  p.Velocity = velocity;
+  p.LifeTime = 1.0f;                           // Duração da partícula no ar
+  p.Color = glm::vec4(0.0f, 1.0f, 1.0f, 1.0f); // Azul Ciano para combinar com a bola
+  activeParticles.push_back(p);
+}
+
+void stopGodzillaSound(unsigned int godzillaHandle)
+{
+  if (godzillaHandle != 0)
+  {
+    soloud.stop(godzillaHandle);
+    godzillaHandle = 0;
   }
 }
