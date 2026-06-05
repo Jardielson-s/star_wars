@@ -21,3 +21,6 @@ g++ main.cpp ../libs/soloud/src/core/*.cpp ../libs/soloud/src/backend/miniaudio/
 
 ```
 
+## Images
+![image](imgs/screen.jpeg)
+![image_1](imgs/screen_1.jpeg)
