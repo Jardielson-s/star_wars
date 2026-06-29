@@ -76,6 +76,7 @@ float waveTransitionTimer = 0.0f;
 const float WAVE_DELAY = 2.0f; // Tempo de espera entre as ondas
 
 int killCount = 0;
+int killCountToSpecial = 0;
 bool canUseSpecial = false;
 bool isChargingSpecial = false;
 float chargeTimer = 0.0f;
@@ -376,9 +377,10 @@ int main()
             if (dist < (enemy.Radius + raioColisao))
             {
               killCount++;
+              killCountToSpecial++;
               // std::cout << "Kills: " << killCount << "/2" << std::endl;
 
-              if (killCount >= 2)
+              if (killCountToSpecial >= 5)
               { // Era 2, mudei para 5 conforme sua ideia
                 canUseSpecial = true;
                 // Não resetar aqui, vamos resetar apenas quando disparar o especial
@@ -396,10 +398,11 @@ int main()
           }
         }
 
-        if (killCount >= 2)
+        if (killCountToSpecial >= 5)
         {
           canUseSpecial = true;
           killCount = 0; // Reseta o contador
+          killCountToSpecial = 0;
           std::cout << "[INFO] ESPECIAL CARREGADO! Pressione 'E' para carregar." << std::endl;
         }
 
@@ -435,8 +438,9 @@ int main()
       {
         dispararLaserEspecial();
         isChargingSpecial = false;
-        canUseSpecial = false; // Desativa até ganhar mais kills
         chargeTimer = 0.0f;
+        canUseSpecial = false; // Desativa até ganhar mais kills
+        killCountToSpecial = 0;
       }
     }
     else if (isChargingSpecial)
@@ -445,6 +449,8 @@ int main()
       isChargingSpecial = false;
       chargeTimer = 0.0f;
       stopGodzillaSound(godzillaHandle);
+      canUseSpecial = false;
+      killCountToSpecial = 0;
     }
 
     // B. Processamento do carregamento
