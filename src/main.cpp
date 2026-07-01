@@ -288,6 +288,8 @@ int main()
         // Adicionamos um fator aleatório baseado no PhaseOffset para que não atirem todas no exato mesmo milissegundo
         if (currentTime - lastEnemyShotTime >= (ENEMY_SHOT_COOLDOWN + (sin(enemy.PhaseOffset) * 0.3f)))
         {
+          soloud.play(soundEnemyLaser);
+
           EnemyLaser el;
           el.Position = enemy.Position;
           el.Direction = glm::normalize(camera.Position - enemy.Position);
@@ -860,6 +862,10 @@ void initAudio()
   }
 
   if (soundGodzillaBlast.load("audio/godzilla_atomic_breath.wav") != SoLoud::SO_NO_ERROR)
+  {
+    std::cerr << "Erro: Nao foi possivel carregar o arquivo de audio!" << std::endl;
+  }
+  if (soundEnemyLaser.load("audio/enemy_sound.wav") != SoLoud::SO_NO_ERROR)
   {
     std::cerr << "Erro: Nao foi possivel carregar o arquivo de audio!" << std::endl;
   }
